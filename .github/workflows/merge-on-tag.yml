@@ -1,0 +1,113 @@
+name: Merge to Main on Tag
+
+on:
+  push:
+    tags:
+      - "release*" # 모든 tag에 대해 트리거
+
+jobs:
+  merge-to-main:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get tag information
+        id: tag_info
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "Tag created: $TAG_NAME"
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Get current branch from tag
+        id: get_branch
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          COMMIT_SHA=$(git rev-list -n 1 $TAG_NAME)
+
+          # 커밋이 존재하는지 확인
+          if [ -z "$COMMIT_SHA" ]; then
+            echo "Error: Tag $TAG_NAME does not point to a valid commit"
+            exit 1
+          fi
+
+          # dev 브랜치가 존재하는지 확인
+          if ! git show-ref --verify --quiet refs/remotes/origin/dev; then
+            echo "Error: dev branch does not exist"
+            exit 1
+          fi
+
+          # tag가 가리키는 커밋이 dev 브랜치에 포함되어 있는지 확인
+          if ! git branch -r --contains $COMMIT_SHA | grep -q "origin/dev"; then
+            echo "Error: Tag $TAG_NAME points to a commit that is not in dev branch. Only dev branch can be merged to main."
+            exit 1
+          fi
+
+          # dev 브랜치가 main에 이미 포함되어 있는지 확인
+          if git branch -r --contains $COMMIT_SHA | grep -q "origin/main"; then
+            echo "branch=dev" >> $GITHUB_OUTPUT
+            echo "needs_merge=false" >> $GITHUB_OUTPUT
+            echo "Tag is already on main branch. No merge needed."
+          else
+            # dev 브랜치를 사용
+            echo "branch=dev" >> $GITHUB_OUTPUT
+            echo "needs_merge=true" >> $GITHUB_OUTPUT
+            echo "Source branch: dev"
+          fi
+
+      - name: Merge to main
+        run: |
+          SOURCE_BRANCH="${{ steps.get_branch.outputs.branch }}"
+          NEEDS_MERGE="${{ steps.get_branch.outputs.needs_merge }}"
+          TAG_NAME="${{ steps.tag_info.outputs.tag_name }}"
+
+          # 브랜치 정보가 없는 경우 (이전 step이 실패했을 수 있음)
+          if [ -z "$SOURCE_BRANCH" ]; then
+            echo "Error: Source branch information is missing. Previous step may have failed."
+            exit 1
+          fi
+
+          # 반드시 dev 브랜치여야 함
+          if [ "$SOURCE_BRANCH" != "dev" ]; then
+            echo "Error: Only dev branch can be merged to main. Current branch: $SOURCE_BRANCH"
+            exit 1
+          fi
+
+          if [ "$NEEDS_MERGE" != "true" ]; then
+            echo "Tag is already on main branch. No merge needed."
+            exit 0
+          fi
+
+          # dev 브랜치가 실제로 원격에 존재하는지 최종 확인
+          echo "Verifying dev branch exists: origin/dev"
+          if ! git show-ref --verify --quiet refs/remotes/origin/dev; then
+            echo "Error: dev branch does not exist. Cannot proceed with merge."
+            exit 1
+          fi
+
+          echo "Source branch verified: origin/dev"
+
+          # main 브랜치로 체크아웃
+          git checkout main
+          git pull origin main
+
+          # dev 브랜치를 main으로 merge
+          echo "Merging dev into main..."
+          git merge origin/dev -m "Merge dev to main (triggered by tag: $TAG_NAME)" || {
+            echo "Merge conflict detected. Please resolve manually."
+            exit 1
+          }
+
+          git push origin main
+          echo "Successfully merged dev to main"
