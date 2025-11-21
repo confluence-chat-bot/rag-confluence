@@ -2,8 +2,10 @@ name: Merge to Main on Tag
 
 on:
   push:
+    branches:
+      - dev # dev 브랜치에만 적용
     tags:
-      - "release*" # 모든 tag에 대해 트리거
+      - "release*" # dev 브랜치의 커밋에 태그가 달릴 때만 트리거
 
 jobs:
   merge-to-main:
