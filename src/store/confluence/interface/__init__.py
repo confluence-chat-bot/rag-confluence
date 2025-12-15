@@ -1,1 +1,0 @@
-"""Confluence Store Interface"""

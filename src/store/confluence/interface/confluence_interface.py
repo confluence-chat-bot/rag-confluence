@@ -2,10 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
 
 
-class DataProcessingInterface(ABC):
-    
+class ConfluenceInterface(ABC):
     @abstractmethod
-    def process(self):
+    def getAllDocuments(self) -> list[dict[str, Any]]:
         pass
-    
-
